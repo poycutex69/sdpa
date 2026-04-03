@@ -6,10 +6,10 @@ Practical assessment project built with Laravel + Inertia React for support/oper
 
 To run locally, install:
 
-- PHP `8.3+`
-- Composer `2+`
-- Node.js `20.19+` (or `22+`)
-- npm `10+`
+- PHP `8.3.30`
+- Composer `2.9.5`
+- Node.js `22.13.1`
+- npm `10.9.2`
 - MySQL `8+` (or compatible)
 - Optional: Laravel Herd (for local domain + PHP runtime management)
 
@@ -33,6 +33,15 @@ To run locally, install:
    - Frontend: `npm run dev`
 7. Open:
    - `http://localhost:8000/login` (or Herd domain, e.g. `http://sdpa.test/login`)
+
+## Running Tests
+
+- Run full Laravel test suite:
+  - `php artisan test`
+- Run a specific test file:
+  - `php artisan test tests/Feature/Issues/IssueVisibilityTest.php`
+- Run tests by name/filter:
+  - `php artisan test --filter=IssueVisibilityTest`
 
 ## Seeding Instructions
 
