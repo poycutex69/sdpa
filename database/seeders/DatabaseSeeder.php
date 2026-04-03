@@ -13,6 +13,9 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->call(UserSeeder::class);
+        $this->call(CategorySeeder::class);
+
         if (Issue::query()->doesntExist()) {
             $this->call(IssueSeeder::class);
         }

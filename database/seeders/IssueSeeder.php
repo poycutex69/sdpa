@@ -2,7 +2,10 @@
 
 namespace Database\Seeders;
 
+use App\Models\Category;
 use App\Models\Issue;
+use App\Models\User;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Seeder;
 
 class IssueSeeder extends Seeder
@@ -12,44 +15,87 @@ class IssueSeeder extends Seeder
      */
     public function run(): void
     {
-        $rows = [
-            [
-                'title' => 'Checkout page returns 500',
-                'description' => 'Customers hit a 500 error when placing an order with coupon codes since yesterday.',
-                'priority' => 'critical',
-                'category' => 'technical',
-                'status' => 'in_progress',
-                'due_at' => now()->subHours(2),
-                'summary' => 'Order checkout fails with 500 when coupon logic runs.',
-                'suggested_next_action' => 'Escalate to on-call engineer, inspect checkout logs, and hotfix failing coupon validator.',
-                'summary_source' => 'rules',
-            ],
-            [
-                'title' => 'Invoice mismatch for enterprise account',
-                'description' => 'Client reports invoice amount is higher than contracted seats by 5 licenses.',
-                'priority' => 'high',
-                'category' => 'billing',
-                'status' => 'new',
-                'due_at' => now()->addHours(12),
-                'summary' => 'Enterprise invoice appears to overcharge by 5 licenses.',
-                'suggested_next_action' => 'Validate seat history and billing plan changes, then issue correction or explanation.',
-                'summary_source' => 'rules',
-            ],
-            [
-                'title' => 'Daily ETL job delayed',
-                'description' => 'Ops reports ETL completed 90 minutes late for two consecutive days.',
-                'priority' => 'medium',
-                'category' => 'operations',
-                'status' => 'in_progress',
-                'due_at' => now()->addDay(),
-                'summary' => 'Nightly ETL job is repeatedly delayed and impacting reporting freshness.',
-                'suggested_next_action' => 'Review scheduler logs, queue depth, and upstream dependencies to isolate delay.',
-                'summary_source' => 'rules',
-            ],
+        $users = User::query()->orderBy('id')->get();
+
+        if ($users->isEmpty()) {
+            return;
+        }
+
+        $categoryNames = ['technical', 'billing', 'operations', 'other'];
+        $categoryIdsByName = collect($categoryNames)
+            ->mapWithKeys(fn (string $name): array => [
+                $name => Category::query()->firstOrCreate(['name' => $name])->id,
+            ]);
+
+        $priorityOptions = ['low', 'medium', 'high', 'critical'];
+        $statusOptions = ['new', 'in_progress', 'resolved', 'closed'];
+        $subjects = [
+            'Checkout flow',
+            'Invoice reconciliation',
+            'Data export',
+            'Email notifications',
+            'Agent dashboard',
+            'Ticket assignment',
+            'Role permissions',
+            'Webhook processing',
+            'Queue worker',
+            'Search indexing',
         ];
 
-        foreach ($rows as $row) {
-            Issue::query()->create($row);
+        for ($index = 1; $index <= 50; $index++) {
+            $creator = $users[($index - 1) % $users->count()];
+            $assignee = $users[$index % $users->count()];
+            $category = $categoryNames[($index - 1) % count($categoryNames)];
+            $priority = $priorityOptions[($index - 1) % count($priorityOptions)];
+            $status = $statusOptions[($index - 1) % count($statusOptions)];
+            $subject = $subjects[($index - 1) % count($subjects)];
+
+            Issue::query()->create([
+                'created_by' => $creator->id,
+                'assigned_to' => $assignee->id,
+                'category' => $category,
+                'category_id' => $categoryIdsByName[$category],
+                'title' => sprintf('%s issue #%02d', $subject, $index),
+                'description' => sprintf(
+                    'Issue %02d affects %s for active users. Symptoms were reported by support and require follow-up.',
+                    $index,
+                    strtolower($subject)
+                ),
+                'priority' => $priority,
+                'status' => $status,
+                'due_at' => $this->dueAtFor($index, $status),
+                'summary' => sprintf('%s issue #%02d requires investigation by the operations team.', $subject, $index),
+                'suggested_next_action' => $this->nextActionFor($priority, $status),
+                'summary_source' => 'rules',
+            ]);
         }
+    }
+
+    private function dueAtFor(int $index, string $status): ?CarbonInterface
+    {
+        if (in_array($status, ['resolved', 'closed'], true) && $index % 3 === 0) {
+            return null;
+        }
+
+        $hourOffset = ($index % 2 === 0) ? 6 + ($index % 18) : -1 * (4 + ($index % 30));
+
+        return now()->addHours($hourOffset);
+    }
+
+    private function nextActionFor(string $priority, string $status): string
+    {
+        if ($status === 'new') {
+            return 'Acknowledge the issue, gather logs, and assign ownership.';
+        }
+
+        if ($status === 'in_progress' && in_array($priority, ['high', 'critical'], true)) {
+            return 'Escalate to on-call engineer and post an internal progress update.';
+        }
+
+        if ($status === 'in_progress') {
+            return 'Continue investigation, document findings, and prepare a fix.';
+        }
+
+        return 'Validate completion notes and confirm no further action is required.';
     }
 }

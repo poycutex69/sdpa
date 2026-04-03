@@ -1,11 +1,28 @@
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 
 type Issue = {
     id: number;
     title: string;
     description: string;
     priority: string;
-    category: string;
+    category_id: number | null;
+    category: { id: number; name: string } | null;
     status: string;
     due_at: string | null;
     summary: string | null;
@@ -13,18 +30,21 @@ type Issue = {
     summary_source: string;
     requires_escalation: boolean;
     created_at: string;
+    assignee: { id: number; name: string } | null;
 };
 
 type Filters = {
     status?: string;
     priority?: string;
-    category?: string;
+    category_id?: string;
 };
 
 type Meta = {
     priorities: string[];
-    categories: string[];
+    categories: { id: number; name: string }[];
     statuses: string[];
+    current_user_id: number;
+    assignable_users: { id: number; name: string }[];
 };
 
 export default function IssueIndex({
@@ -36,11 +56,13 @@ export default function IssueIndex({
     filters: Filters;
     meta: Meta;
 }) {
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const createForm = useForm({
         title: '',
         description: '',
         priority: 'medium',
-        category: 'technical',
+        category_id: meta.categories[0]?.id ? String(meta.categories[0].id) : '',
+        assigned_to: String(meta.current_user_id),
         status: 'new',
         due_at: '',
     });
@@ -53,10 +75,26 @@ export default function IssueIndex({
             onSuccess: () => {
                 createForm.reset('title', 'description', 'due_at');
                 createForm.setData('priority', 'medium');
-                createForm.setData('category', 'technical');
+                createForm.setData(
+                    'category_id',
+                    meta.categories[0]?.id
+                        ? String(meta.categories[0].id)
+                        : '',
+                );
+                createForm.setData('assigned_to', String(meta.current_user_id));
                 createForm.setData('status', 'new');
+                createForm.clearErrors();
+                setIsCreateModalOpen(false);
             },
         });
+    };
+
+    const handleCreateModalChange = (open: boolean) => {
+        setIsCreateModalOpen(open);
+
+        if (!open) {
+            createForm.clearErrors();
+        }
     };
 
     const updateFilter = (key: keyof Filters, value: string) => {
@@ -88,18 +126,198 @@ export default function IssueIndex({
             <Head title="Issue Intake" />
 
             <main className="mx-auto max-w-6xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
-                <section className="space-y-1">
-                    <h1 className="text-2xl font-semibold tracking-tight">
-                        Issue Intake and Smart Summary
-                    </h1>
-                    <p className="text-sm text-muted-foreground">
-                        Submit support issues, auto-generate summaries, and
-                        triage by priority/status/category.
-                    </p>
-                </section>
+                <section className="space-y-4">
+                    <div className="flex justify-end">
+                        <Button type="button" onClick={() => setIsCreateModalOpen(true)}>
+                            Create Issue
+                        </Button>
+                    </div>
 
-                <section className="rounded-xl border bg-card p-4">
-                    <h2 className="mb-4 text-lg font-medium">Create Issue</h2>
+                    <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
+                        <Select
+                            value={filters.status ?? 'all'}
+                            onValueChange={(value) =>
+                                updateFilter(
+                                    'status',
+                                    value === 'all' ? '' : value,
+                                )
+                            }
+                        >
+                            <SelectTrigger className="w-full capitalize">
+                                <SelectValue placeholder="All statuses" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All statuses</SelectItem>
+                                {meta.statuses.map((status) => (
+                                    <SelectItem
+                                        key={status}
+                                        value={status}
+                                        className="capitalize"
+                                    >
+                                        {status}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select
+                            value={filters.priority ?? 'all'}
+                            onValueChange={(value) =>
+                                updateFilter(
+                                    'priority',
+                                    value === 'all' ? '' : value,
+                                )
+                            }
+                        >
+                            <SelectTrigger className="w-full capitalize">
+                                <SelectValue placeholder="All priorities" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All priorities</SelectItem>
+                                {meta.priorities.map((priority) => (
+                                    <SelectItem
+                                        key={priority}
+                                        value={priority}
+                                        className="capitalize"
+                                    >
+                                        {priority}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select
+                            value={filters.category_id ?? 'all'}
+                            onValueChange={(value) =>
+                                updateFilter(
+                                    'category_id',
+                                    value === 'all' ? '' : value,
+                                )
+                            }
+                        >
+                            <SelectTrigger className="w-full capitalize">
+                                <SelectValue placeholder="All categories" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All categories</SelectItem>
+                                {meta.categories.map((category) => (
+                                    <SelectItem
+                                        key={category.id}
+                                        value={String(category.id)}
+                                    >
+                                        {category.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="space-y-3">
+                        {issues.length === 0 ? (
+                            <p className="rounded-xl border p-4 text-sm text-muted-foreground">
+                                No issues found for the selected filters.
+                            </p>
+                        ) : (
+                            issues.map((issue) => (
+                                <article
+                                    key={issue.id}
+                                    className="rounded-xl border bg-card p-5 shadow-sm"
+                                >
+                                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                                        <h3 className="max-w-3xl text-lg font-semibold leading-snug">
+                                            <Link
+                                                href={`/issues/${issue.id}`}
+                                                className="hover:underline"
+                                            >
+                                                {issue.title}
+                                            </Link>
+                                        </h3>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium capitalize dark:bg-slate-800">
+                                                {issue.priority}
+                                            </span>
+                                            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium capitalize dark:bg-slate-800">
+                                                {issue.category?.name ?? 'uncategorized'}
+                                            </span>
+                                            {issue.requires_escalation && (
+                                                <span className="rounded-md bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-300">
+                                                    Escalate
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="mb-4 space-y-3 rounded-lg border border-dashed p-3">
+                                        <p className="text-sm leading-relaxed">
+                                            <span className="font-semibold">Summary:</span>{' '}
+                                            {issue.summary ?? 'Not generated'}
+                                        </p>
+                                        <p className="text-sm leading-relaxed">
+                                            <span className="font-semibold">
+                                                Suggested next action:
+                                            </span>{' '}
+                                            {issue.suggested_next_action ?? 'Not generated'}
+                                        </p>
+                                        <p className="text-xs text-muted-foreground">
+                                            Source: {issue.summary_source}
+                                        </p>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-end justify-between gap-3">
+                                        <div className="space-y-1">
+                                            {issue.assignee?.name && (
+                                                <p className="text-sm text-muted-foreground">
+                                                    <span className="font-medium text-foreground">
+                                                        Assigned to:
+                                                    </span>{' '}
+                                                    {issue.assignee.name}
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <label className="text-sm font-medium">
+                                                Status
+                                            </label>
+                                            <Select
+                                                value={issue.status}
+                                                onValueChange={(value) =>
+                                                    updateStatus(issue.id, value)
+                                                }
+                                            >
+                                                <SelectTrigger className="w-[170px] capitalize">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {meta.statuses.map((status) => (
+                                                        <SelectItem
+                                                            key={status}
+                                                            value={status}
+                                                            className="capitalize"
+                                                        >
+                                                            {status}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                </article>
+                            ))
+                        )}
+                    </div>
+                </section>
+            </main>
+
+            <Dialog open={isCreateModalOpen} onOpenChange={handleCreateModalChange}>
+                <DialogContent className="sm:max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Create Issue</DialogTitle>
+                        <DialogDescription>
+                            Submit a new issue for triage and automated summary generation.
+                        </DialogDescription>
+                    </DialogHeader>
+
                     <form onSubmit={submitIssue} className="grid gap-4 md:grid-cols-2">
                         <div className="md:col-span-2">
                             <label className="mb-1 block text-sm font-medium">
@@ -142,57 +360,118 @@ export default function IssueIndex({
                             <label className="mb-1 block text-sm font-medium">
                                 Priority
                             </label>
-                            <select
+                            <Select
                                 value={createForm.data.priority}
-                                onChange={(event) =>
-                                    createForm.setData('priority', event.target.value)
+                                onValueChange={(value) =>
+                                    createForm.setData('priority', value)
                                 }
-                                className="w-full rounded-md border px-3 py-2 text-sm capitalize"
                             >
-                                {meta.priorities.map((priority) => (
-                                    <option key={priority} value={priority}>
-                                        {priority}
-                                    </option>
-                                ))}
-                            </select>
+                                <SelectTrigger className="w-full capitalize">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {meta.priorities.map((priority) => (
+                                        <SelectItem
+                                            key={priority}
+                                            value={priority}
+                                            className="capitalize"
+                                        >
+                                            {priority}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         <div>
                             <label className="mb-1 block text-sm font-medium">
                                 Category
                             </label>
-                            <select
-                                value={createForm.data.category}
-                                onChange={(event) =>
-                                    createForm.setData('category', event.target.value)
+                            <Select
+                                value={createForm.data.category_id}
+                                onValueChange={(value) =>
+                                    createForm.setData('category_id', value)
                                 }
-                                className="w-full rounded-md border px-3 py-2 text-sm capitalize"
                             >
-                                {meta.categories.map((category) => (
-                                    <option key={category} value={category}>
-                                        {category}
-                                    </option>
-                                ))}
-                            </select>
+                                <SelectTrigger className="w-full capitalize">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {meta.categories.map((category) => (
+                                        <SelectItem
+                                            key={category.id}
+                                            value={String(category.id)}
+                                        >
+                                            {category.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {createForm.errors.category_id && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {createForm.errors.category_id}
+                                </p>
+                            )}
                         </div>
 
                         <div>
                             <label className="mb-1 block text-sm font-medium">
                                 Status
                             </label>
-                            <select
+                            <Select
                                 value={createForm.data.status}
-                                onChange={(event) =>
-                                    createForm.setData('status', event.target.value)
+                                onValueChange={(value) =>
+                                    createForm.setData('status', value)
                                 }
-                                className="w-full rounded-md border px-3 py-2 text-sm capitalize"
                             >
-                                {meta.statuses.map((status) => (
-                                    <option key={status} value={status}>
-                                        {status}
-                                    </option>
-                                ))}
-                            </select>
+                                <SelectTrigger className="w-full capitalize">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {meta.statuses.map((status) => (
+                                        <SelectItem
+                                            key={status}
+                                            value={status}
+                                            className="capitalize"
+                                        >
+                                            {status}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+
+                        <div>
+                            <label className="mb-1 block text-sm font-medium">
+                                Assigned To
+                            </label>
+                            <Select
+                                value={createForm.data.assigned_to}
+                                onValueChange={(value) =>
+                                    createForm.setData('assigned_to', value)
+                                }
+                            >
+                                <SelectTrigger className="w-full">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {meta.assignable_users.map((user, index) => (
+                                        <SelectItem
+                                            key={user.id}
+                                            value={String(user.id)}
+                                        >
+                                            {index === 0
+                                                ? `Me`
+                                                : `${user.name}`}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            {createForm.errors.assigned_to && (
+                                <p className="mt-1 text-xs text-red-600">
+                                    {createForm.errors.assigned_to}
+                                </p>
+                            )}
                         </div>
 
                         <div>
@@ -217,119 +496,17 @@ export default function IssueIndex({
                             </button>
                         </div>
                     </form>
-                </section>
-
-                <section className="space-y-4">
-                    <div className="grid gap-3 rounded-xl border bg-card p-4 sm:grid-cols-3">
-                        <select
-                            value={filters.status ?? ''}
-                            onChange={(event) => updateFilter('status', event.target.value)}
-                            className="w-full rounded-md border px-3 py-2 text-sm capitalize"
-                        >
-                            <option value="">All statuses</option>
-                            {meta.statuses.map((status) => (
-                                <option key={status} value={status}>
-                                    {status}
-                                </option>
-                            ))}
-                        </select>
-
-                        <select
-                            value={filters.priority ?? ''}
-                            onChange={(event) => updateFilter('priority', event.target.value)}
-                            className="w-full rounded-md border px-3 py-2 text-sm capitalize"
-                        >
-                            <option value="">All priorities</option>
-                            {meta.priorities.map((priority) => (
-                                <option key={priority} value={priority}>
-                                    {priority}
-                                </option>
-                            ))}
-                        </select>
-
-                        <select
-                            value={filters.category ?? ''}
-                            onChange={(event) => updateFilter('category', event.target.value)}
-                            className="w-full rounded-md border px-3 py-2 text-sm capitalize"
-                        >
-                            <option value="">All categories</option>
-                            {meta.categories.map((category) => (
-                                <option key={category} value={category}>
-                                    {category}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    <div className="space-y-3">
-                        {issues.length === 0 ? (
-                            <p className="rounded-xl border p-4 text-sm text-muted-foreground">
-                                No issues found for the selected filters.
-                            </p>
-                        ) : (
-                            issues.map((issue) => (
-                                <article key={issue.id} className="rounded-xl border bg-card p-4">
-                                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                        <h3 className="text-base font-semibold">
-                                            {issue.title}
-                                        </h3>
-                                        <div className="flex items-center gap-2">
-                                            <span className="rounded bg-slate-100 px-2 py-1 text-xs capitalize dark:bg-slate-800">
-                                                {issue.priority}
-                                            </span>
-                                            <span className="rounded bg-slate-100 px-2 py-1 text-xs capitalize dark:bg-slate-800">
-                                                {issue.category}
-                                            </span>
-                                            {issue.requires_escalation && (
-                                                <span className="rounded bg-red-100 px-2 py-1 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-300">
-                                                    Escalate
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <p className="mb-3 text-sm text-muted-foreground">
-                                        {issue.description}
-                                    </p>
-
-                                    <div className="mb-3 grid gap-2 text-sm">
-                                        <p>
-                                            <span className="font-medium">Summary:</span>{' '}
-                                            {issue.summary ?? 'Not generated'}
-                                        </p>
-                                        <p>
-                                            <span className="font-medium">Suggested next action:</span>{' '}
-                                            {issue.suggested_next_action ?? 'Not generated'}
-                                        </p>
-                                        <p className="text-xs text-muted-foreground">
-                                            Source: {issue.summary_source}
-                                        </p>
-                                    </div>
-
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <label className="text-sm font-medium">
-                                            Status
-                                        </label>
-                                        <select
-                                            value={issue.status}
-                                            onChange={(event) =>
-                                                updateStatus(issue.id, event.target.value)
-                                            }
-                                            className="rounded-md border px-2 py-1 text-sm capitalize"
-                                        >
-                                            {meta.statuses.map((status) => (
-                                                <option key={status} value={status}>
-                                                    {status}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                </article>
-                            ))
-                        )}
-                    </div>
-                </section>
-            </main>
+                </DialogContent>
+            </Dialog>
         </>
     );
 }
+
+IssueIndex.layout = {
+    breadcrumbs: [
+        {
+            title: 'Issues',
+            href: '/issues',
+        },
+    ],
+};

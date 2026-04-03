@@ -27,9 +27,10 @@ class UpdateIssueRequest extends FormRequest
             'title' => ['sometimes', 'required', 'string', 'max:160'],
             'description' => ['sometimes', 'required', 'string', 'min:10'],
             'priority' => ['sometimes', 'required', Rule::in(Issue::PRIORITIES)],
-            'category' => ['sometimes', 'required', Rule::in(Issue::CATEGORIES)],
+            'category_id' => ['sometimes', 'required', 'integer', 'exists:categories,id'],
             'status' => ['sometimes', 'required', Rule::in(Issue::STATUSES)],
             'due_at' => ['sometimes', 'nullable', 'date'],
+            'assigned_to' => ['sometimes', 'nullable', 'integer', 'exists:users,id'],
         ];
     }
 }

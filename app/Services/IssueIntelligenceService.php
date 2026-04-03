@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Throwable;
 
@@ -35,59 +36,112 @@ class IssueIntelligenceService
      */
     private function fromLlm(string $title, string $description, string $priority, string $category): ?array
     {
-        $apiKey = (string) config('services.openai.api_key');
+        $apiKey = (string) config('services.gemini.api_key');
+        $configuredModel = (string) config('services.gemini.model', 'gemini-2.0-flash');
 
         if ($apiKey === '') {
             return null;
         }
 
-        try {
-            $response = Http::timeout(12)
-                ->acceptJson()
-                ->withToken($apiKey)
-                ->post('https://api.openai.com/v1/chat/completions', [
-                    'model' => config('services.openai.model', 'gpt-4o-mini'),
-                    'temperature' => 0.2,
-                    'messages' => [
-                        [
-                            'role' => 'system',
-                            'content' => 'You summarize support tickets. Return strict JSON with keys: summary and suggested_next_action.',
+        $modelsToTry = collect([
+            $configuredModel,
+            'gemini-2.0-flash-lite',
+            'gemini-flash-latest',
+            'gemini-2.0-flash',
+            'gemini-2.5-flash',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-latest',
+        ])->filter(fn (?string $model): bool => is_string($model) && trim($model) !== '')
+            ->map(fn (string $model): string => trim($model))
+            ->unique()
+            ->values();
+
+        $failures = [];
+
+        foreach ($modelsToTry as $model) {
+            try {
+                $response = Http::timeout(12)
+                    ->acceptJson()
+                    ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}", [
+                        'contents' => [
+                            [
+                                'parts' => [
+                                    [
+                                        'text' => "You summarize support tickets.\n\nTitle: {$title}\nPriority: {$priority}\nCategory: {$category}\nDescription: {$description}\n\nReturn JSON only with keys: summary and suggested_next_action. Keep each value <= 200 chars.",
+                                    ],
+                                ],
+                            ],
                         ],
-                        [
-                            'role' => 'user',
-                            'content' => "Title: {$title}\nPriority: {$priority}\nCategory: {$category}\nDescription: {$description}\n\nRules: Keep summary <= 200 chars. Keep suggested_next_action <= 200 chars.",
+                        'generationConfig' => [
+                            'temperature' => 0.2,
                         ],
-                    ],
-                ]);
+                    ]);
 
-            $response->throw();
+                if (! $response->successful()) {
+                    $errorMessage = (string) (Arr::get($response->json(), 'error.message') ?? '');
+                    $failures[] = "model={$model}; status={$response->status()}; message={$errorMessage}";
+                    continue;
+                }
 
-            $content = Arr::get($response->json(), 'choices.0.message.content');
+                $content = Arr::get($response->json(), 'candidates.0.content.parts.0.text');
 
-            if (! is_string($content) || trim($content) === '') {
-                return null;
+                if (! is_string($content) || trim($content) === '') {
+                    $failures[] = "model={$model}; empty content";
+                    continue;
+                }
+
+                $decoded = $this->decodeJsonPayload($content);
+
+                if (! is_array($decoded)) {
+                    $failures[] = "model={$model}; invalid json payload";
+                    continue;
+                }
+
+                $summary = Str::limit(trim((string) ($decoded['summary'] ?? '')), 200, '...');
+                $nextAction = Str::limit(trim((string) ($decoded['suggested_next_action'] ?? '')), 200, '...');
+
+                if ($summary === '' || $nextAction === '') {
+                    $failures[] = "model={$model}; missing fields";
+                    continue;
+                }
+
+                return [
+                    'summary' => $summary,
+                    'suggested_next_action' => $nextAction,
+                ];
+            } catch (Throwable $exception) {
+                $failures[] = "model={$model}; exception={$exception->getMessage()}";
             }
+        }
 
-            $decoded = json_decode(trim($content), true);
+        if (app()->isLocal()) {
+            Log::warning('IssueIntelligenceService Gemini fallback to rules', [
+                'reasons' => $failures,
+            ]);
+        }
 
-            if (! is_array($decoded)) {
-                return null;
-            }
+        return null;
+    }
 
-            $summary = Str::limit(trim((string) ($decoded['summary'] ?? '')), 200, '...');
-            $nextAction = Str::limit(trim((string) ($decoded['suggested_next_action'] ?? '')), 200, '...');
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function decodeJsonPayload(string $content): ?array
+    {
+        $trimmed = trim($content);
+        $decoded = json_decode($trimmed, true);
 
-            if ($summary === '' || $nextAction === '') {
-                return null;
-            }
+        if (is_array($decoded)) {
+            return $decoded;
+        }
 
-            return [
-                'summary' => $summary,
-                'suggested_next_action' => $nextAction,
-            ];
-        } catch (Throwable) {
+        if (preg_match('/\{(?:[^{}]|(?R))*\}/s', $trimmed, $matches) !== 1) {
             return null;
         }
+
+        $decoded = json_decode($matches[0], true);
+
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**

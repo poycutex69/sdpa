@@ -27,9 +27,10 @@ class StoreIssueRequest extends FormRequest
             'title' => ['required', 'string', 'max:160'],
             'description' => ['required', 'string', 'min:10'],
             'priority' => ['required', Rule::in(Issue::PRIORITIES)],
-            'category' => ['required', Rule::in(Issue::CATEGORIES)],
+            'category_id' => ['required', 'integer', 'exists:categories,id'],
             'status' => ['nullable', Rule::in(Issue::STATUSES)],
             'due_at' => ['nullable', 'date'],
+            'assigned_to' => ['nullable', 'integer', 'exists:users,id'],
         ];
     }
 }
